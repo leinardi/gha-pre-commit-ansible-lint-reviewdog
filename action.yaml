@@ -1,6 +1,5 @@
-# Replace `<OWNER>/<REPO>` with this action’s repository, and `<TOOL>` / `<HOOK_ID>` with the actual tool and hook name for the concrete action.
-name: "Run <TOOL> via pre-commit + reviewdog"
-description: "Runs <HOOK_ID> pre-commit hook on a diff range and reports via reviewdog"
+name: "Run ansible-lint via pre-commit + reviewdog"
+description: "Runs the ansible-lint-parseable pre-commit hook on a ref range and reports diagnostics via reviewdog"
 author: "leinardi"
 branding:
   icon: "check-circle"
@@ -19,8 +18,8 @@ inputs:
 
 outputs:
   exitcode:
-    description: "Exit code of the <HOOK_ID> pre-commit hook"
-    value: ${{ steps.run_hook.outputs.exitcode }}
+    description: "Exit code returned by the ansible-lint-parseable pre-commit hook"
+    value: ${{ steps.ansible_lint.outputs.exitcode }}
 
 runs:
   using: "composite"
@@ -42,41 +41,35 @@ runs:
       with:
         reviewdog_version: latest
 
-    # TODO: customize this step for your specific hook and parsing logic
-    - name: Run <HOOK_ID> pre-commit hook
-      id: run_hook
+    - name: Run ansible-lint (ansible-lint-parseable hook)
+      id: ansible_lint
       shell: bash
       run: |
         set +e
         set -o pipefail
 
-        # Run the specific pre-commit hook on the diff range
-        pre-commit run <HOOK_ID> \
+        pre-commit run ansible-lint-parseable \
           --hook-stage manual \
           --from-ref "${{ inputs.from-ref }}" \
           --to-ref   "${{ inputs.to-ref }}" \
           --color=never \
-          | tee hook-output.txt
+          | tee >(grep -Ev '^\[INFO\]' | tail -n +5 > ansible-lint-report.txt)
 
         exitcode=${PIPESTATUS[0]}
         echo "exitcode=$exitcode" >> "$GITHUB_OUTPUT"
         # Do not fail here; let reviewdog decide
         exit 0
 
-    - name: Report findings via reviewdog
-      if: steps.run_hook.outputs.exitcode != '0'
+    - name: Report ansible-lint via reviewdog
+      if: steps.ansible_lint.outputs.exitcode != '0'
       env:
         REVIEWDOG_GITHUB_API_TOKEN: ${{ inputs.github-token }}
       shell: bash
       run: |
-        # TODO: adapt this part to match your tool's output format and efm
-        # For example, you might need to transform hook-output.txt lines
-        # into reviewdog's %t:%f:%l:%c:%m format.
-
-        cat hook-output.txt \
+        cat ansible-lint-report.txt \
           | reviewdog \
               -efm="%f:%l:%c: %m" \
-              -name="<TOOL>" \
+              -name="ansible-lint" \
               -reporter=github-pr-review \
               -filter-mode=nofilter \
               -fail-level=info
